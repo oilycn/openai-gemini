@@ -190,13 +190,20 @@ const transformMessages = async (messages) => {
     return { system_instruction, contents };
 };
 
-const transformRequest = async (req) => ({
-    ...await transformMessages(req.messages),
-    safetySettings,
-    generationConfig: transformConfig(req),
-    tools: req.tools,
-    tool_choice: req.tool_choice,
-});
+const transformRequest = async (req) => {
+    const transformed = {
+        ...await transformMessages(req.messages),
+        safetySettings,
+        generationConfig: transformConfig(req),
+    };
+    if (req.tools) {
+        transformed.tools = req.tools;
+    }
+    if (req.tool_choice) {
+        transformed.tool_choice = req.tool_choice;
+    }
+    return transformed;
+};
 
 const transformCandidates = (key, cand) => ({
     index: cand.index || 0,
@@ -386,14 +393,22 @@ async function handleCompletions(req, apiKey) {
     const TASK = req.stream ? "streamGenerateContent" : "generateContent";
     let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
     if (req.stream) { url += "?alt=sse"; }
+    
+    const transformedRequest = await transformRequest(req);
+    console.log("Transformed Request:", JSON.stringify(transformedRequest, null, 2)); // Log the transformed request
+    
     const response = await fetch(url, {
         method: "POST",
         headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-        body: JSON.stringify(await transformRequest(req)),
+        body: JSON.stringify(transformedRequest),
     });
+    
     if (!response.ok) {
-        throw new HttpError(`Failed to fetch completions: ${response.status} ${response.statusText}`, response.status);
+        const errorText = await response.text();
+        console.error("Gemini API Error:", response.status, response.statusText, errorText); // Log the error response
+        throw new HttpError(`Failed to fetch completions: ${response.status} ${response.statusText} ${errorText}`, response.status);
     }
+    
     let body = response.body;
     if (req.stream) {
         body = response.body
